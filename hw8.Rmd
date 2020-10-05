@@ -1,0 +1,156 @@
+---
+title: "HW8"
+author: "Chen Liu"
+date: "3/7/2020"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Answer questions using 5% significance level in tests and 10 lags of serial correlations for return series.
+
+## Consider daily returns of ETF SPDR S&P 500 from file d-spy-0111.txt.
+
+### Transform the simple returns into log-returns
+
+```{r,include=FALSE}
+library(tseries)
+library(forecast)
+library(TSA)
+library(fGarch)
+```
+
+load data
+```{r}
+datapath<-"/Users/me/Desktop/MSCA/FinancialAnalytics/week8"
+da<-read.table(paste(datapath,"d-spy-0111.txt",sep="/"),header=T)
+head(da)
+```
+
+```{r}
+rtn=log(da$rtn+1)
+rtn.ts = ts(rtn, start = c(2001, 9, 4), frequency = 252)
+plot(rtn.ts,type='l',xlab='year',ylab='ln-rtn') # time plot
+```
+
+## a) 1. Is the expected log-return zero? 
+```{r}
+#Test H0: = “Mean Equals Zero”
+t.test(rtn)  # testing the mean of returns
+```
+The p-value is 0.79, which is larger than 0.05. We fail to reject the null hypothesis that the mean is equal to zero. Therefore, the expected log-return is not significantly different from zero.
+
+## a) 2. Are there any serial correlations in the log returns? 
+```{r}
+#Run Box-Ljung test H0: = “Serial Correlations are Zero”.
+Box.test(rtn,lag=12,type='Ljung')
+# Plot ACF of returns and ACF of absolute returns.
+par(mfcol=c(2,1))
+acf(rtn,lag=24) # ACF plots
+acf(abs(rtn),lag=24) 
+```
+The p-value is way smaller than 0.05, so we can reject the null hypothesis that serial correlations are zero. There are serial correlations in the log returns.
+
+## a) 3. Is there ARCH effect in the log-returns?
+```{r}
+#Calculate squared residuals and apply Box-Ljung test.
+#ARCH test
+y=rtn-mean(rtn)
+Box.test(y^2,lag=12,type='Ljung')
+```
+According to Box-Ljung test the zero correlations hypothesis is rejected. This is an indication of ARCH effect.
+
+```{r}
+#it applies Engle’s test:
+"archTest" <- function(rtn,m=10){
+# Perform Lagrange Multiplier Test for ARCH effect of a time series
+# rtn: time series
+# m: selected AR order
+#
+y=(rtn-mean(rtn))^2
+T=length(rtn)
+atsq=y[(m+1):T]
+x=matrix(0,(T-m),m)
+for (i in 1:m){
+x[,i]=y[(m+1-i):(T-i)]
+}
+md=lm(atsq~x)
+summary(md)
+}
+archTest(y,12)
+```
+The output confirms ARCH effect.
+
+## b). Fit Gaussian ARMA-GARCH model for the log-return series. Perform model checking. Obtain the QQ-plot of the standardized residuals. Write down the fitted model. [Hint: use GARCH(2,1)]
+
+Look at ACF and PACF of the squared returns.
+```{r}
+par(mfcol=c(2,1))
+acf(rtn^2)
+pacf(rtn^2)
+```
+Try Garch(2,1)
+```{r}
+m1=garchFit(~1+garch(2,1),data=rtn,trace=F) # Fit an GARCH(2,1) model
+summary(m1)
+m1@fit$coef
+```
+The fitted model is :
+rt=μ+at,
+at=σtϵt,
+σ2t=α0+α1a2t−1+α2a2t−2+beta1σ2t-1,
+
+Model Checking
+```{r}
+resi<-residuals(m1,standardize=T) # Standardized residuals
+tdx=c(1:2535)/252+2001
+par(mfcol=c(3,1))
+plot(tdx,resi,xlab='year',ylab='stand-resi',type='l')
+acf(resi,lag=20)
+pacf(resi^2,lag=20)
+```
+The ACF plot shows that standardized residuals do not have autocorrelation.
+PACF for squared residuals shows significant correlation at the 10th lags.
+In general the model seems adequate.
+
+```{r}
+#Q-Q plot
+plot(m1,which=13)
+
+```
+The QQ plot shows short tails expecially on the left side. 
+
+## c). Build an ARMA-GARCH model with Student t innovations for the log-return series. Perform model checking and write down the fitted model.
+
+```{r}
+# Student-t innovations
+m2=garchFit(~1+garch(2,1),data=rtn,trace=F,cond.dist="std")
+summary(m2)
+```
+The fitted model is :
+rt=μ+at,
+at=σtϵt,
+σ2t=α0+α1a2t−1+α2a2t−2+beta1σ2t-1,
+coefficients are as below:
+```{r}
+m2@fit$coef
+```
+
+```{r}
+#Model Checking
+resi2<-residuals(m2,standardize=T) # Standardized residuals
+tdx2=c(1:2535)/252+2001
+par(mfcol=c(3,1))
+plot(tdx2,resi2,xlab='year',ylab='stand-resi',type='l')
+acf(resi2,lag=20)
+pacf(resi2^2,lag=20)
+```
+The ACF plot shows that standardized residuals do not have autocorrelation.
+PACF for squared residualsshows that standardized residuals do not have significant correlation.
+The ARMA-Garch model with student t innovation performs better.
+
+

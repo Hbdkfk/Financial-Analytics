@@ -1,0 +1,196 @@
+---
+title: "Homework9"
+author: "Chen Liu"
+date: "3/13/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r,include=FALSE}
+library(MASS)
+```
+
+```{r,load data}
+datapath<-"/Users/me/Desktop/MSCA/FinancialAnalytics/week9"
+df<-read.csv(file=paste(datapath,'hft2_trades_train.csv',sep="/"), header=T) 
+head(df)
+```
+
+```{r}
+# calculate seconds using timestamp
+df$second<-c(0,diff(df$timestamp))/10^6
+tick <- 25  
+df$pch <- c(0, df$price[2:nrow(df)] - df$price[2:nrow(df) - 1] ) / tick
+head(df)
+dim(df)
+```
+
+```{r}
+#Create the components of decomposition A,D and S.
+idx=c(1:19494)[df$pch > 0]
+jdx=c(1:19494)[df$pch < 0]
+A=rep(0,19494); A[idx]=1; A[jdx]=1
+D=rep(0,19494); D[idx]=1; D[jdx]=-1
+S=abs(df$pch)
+# Create lagged variables
+Ai=A[2:19494]
+Aim1=A[1:19493]
+Di=D[2:19494]
+Dim1=D[1:19493]
+Si=S[2:19494]
+Sim1=S[1:19493]
+```
+
+```{r}
+#Fit logistic regression models to the components.
+m1<-glm(Ai~Aim1,family='binomial')
+summary(m1)
+```
+```{r}
+di<-Di[Ai==1]
+dim1<-Dim1[Ai==1]
+di<-(di+abs(di))/2 # transform di to binary
+m2 <- glm(di~dim1,family="binomial") 
+summary(m2)
+```
+
+```{r,include=FALSE}
+"GeoSize" <- function(Si,xre=NULL)
+{
+  # Estimation of geometric distribution for sizes of a price change
+  # Step 1: Initialize Time Series Globally:
+  if(length(xre) == 0){
+    k=0}
+  else{
+    xre=as.matrix(xre)
+    k=dim(xre)[2]
+  }
+  GSi <<- Si; Xre <<- xre
+  # Step 2: Initialize Model Parameters and Bounds:
+  Mean=mean(Si); P=1/(Mean+1); Ome= log(P/(1-P))
+  if(k > 0) Ome=c(Ome,rep(1,k))
+  params = c(omega = Ome)
+  lowerBounds = c(omega = -10*abs(Ome))
+  upperBounds = c(omega = 10*abs(Ome))
+  # Step 3: Set Conditional Distribution Function:
+  geomDist = function(Si,pp) { 
+    LL=dgeom(Si-1,pp,log=TRUE)
+    LL
+  }
+  # Step 4: Compose log-Likelihood Function:
+  geomLLH = function(parm) {
+    if(length(Xre)==0){
+      k=0}
+    else{
+      k=dim(Xre)[2]
+    }
+    om=parm[1]
+    if(k > 0){
+      for (i in 1:k){
+        om=om+parm[1+i]*Xre[,i]
+      }
+    }
+    p1=exp(om)
+    pp=p1/(1+p1)
+    llh = -sum(geomDist(GSi,pp))
+    llh }
+  print(geomLLH(params))
+  # Step 5: Estimate Parameters and Compute Numerically Hessian:
+  fit = nlminb(start = params, objective = geomLLH,
+               lower = lowerBounds, upper = upperBounds, control = list(trace=3))
+  cat("Estimates: ",fit$par,"\n")
+  epsilon = 0.0001 * fit$par
+  npar=length(params)
+  Hessian = matrix(0, ncol = npar, nrow = npar)
+  for (i in 1:npar) {
+    for (j in 1:npar) {
+      x1 = x2 = x3 = x4  = fit$par
+      x1[i] = x1[i] + epsilon[i]; x1[j] = x1[j] + epsilon[j]
+      x2[i] = x2[i] + epsilon[i]; x2[j] = x2[j] - epsilon[j]
+      x3[i] = x3[i] - epsilon[i]; x3[j] = x3[j] + epsilon[j]
+      x4[i] = x4[i] - epsilon[i]; x4[j] = x4[j] - epsilon[j]
+      Hessian[i, j] = (geomLLH(x1)-geomLLH(x2)-geomLLH(x3)+geomLLH(x4))/
+        (4*epsilon[i]*epsilon[j])
+    }
+  }
+  # Step 6: Create and Print Summary Report:
+  se.coef = sqrt(diag(solve(Hessian)))
+  tval = fit$par/se.coef
+  matcoef = cbind(fit$par, se.coef, tval, 2*(1-pnorm(abs(tval))))
+  dimnames(matcoef) = list(names(tval), c(" Estimate",
+                                          " Std. Error", " t value", "Pr(>|t|)"))
+  cat("\nCoefficient(s):\n")
+  printCoefmat(matcoef, digits = 6, signif.stars = TRUE)
+  # compute output
+  est=fit$par
+  
+  GeoSize <- list(par=est)
+}
+```
+
+```{r}
+si<-Si[Di==1]
+sim1<-Sim1[Di==1]
+m3<-GeoSize(si,sim1)
+```
+
+```{r}
+nsi<-Si[Di==-1]
+nsim1<-Sim1[Di==-1]
+m4<-GeoSize(nsi,nsim1)
+```
+
+```{r}
+# m1
+beta_0 <- unname(m1$coefficients[1]) 
+beta_1 <- unname(m1$coefficients[2])
+# m2
+gamma_0 <- unname(m2$coefficients[1]) 
+gamma_1 <- unname(m2$coefficients[2])
+# m3
+theta_u0 <- unname(m3$par[1]) 
+theta_u1 <- unname(m3$par[2])
+# m4
+theta_d0 <- unname(m4$par[1]) 
+theta_d1 <- unname(m4$par[2])
+
+pch_decomposition_cdf <- function(x, aim1, dim1, sim1, decomp_params) {  
+    pch_cdf <- 0
+    p <- plogis(decomp_params$beta_0 + decomp_params$beta_1 * aim1)    # Pr( Ai =  1 | aim1 )
+    q <- plogis(decomp_params$gamma_0 + decomp_params$gamma_1 * dim1)  # Pr( Di = +1 | dim1 )
+    
+    lambda_up = plogis(decomp_params$theta_u0 + decomp_params$theta_u1 * sim1)
+    lambda_down = plogis(decomp_params$theta_d0 + decomp_params$theta_d1 * sim1)
+    
+    if (x < 0) {
+        # P( next_pch <= x ) = Pr( Ai = 1, Di = -1, Si >= -x ) = Pr( Ai = 1, Di = -1, Si > -x-1 ) 
+        # since Si ~ 1 + geom(lambda_down) when Di = -1 we have:
+        pch_cdf <- p * (1-q) * pgeom(-x-2, prob=lambda_down, lower.tail = FALSE) 
+    } else if (x >= 0) {
+        # P( next_pch <= x ) = Pr( Ai = 0 ) + Pr( Ai = 1, Di = 1 ) + Pr( Ai = 1, Di = -1, Si <= x ) = 
+        # = (1-p) + p*(1-q) + Pr( Ai = 1, Di = 1, Si <= x ) 
+        # since Si ~ 1 + geom(lambda_up) when Di = 1 we have:
+        pch_cdf <- (1-p) + p * (1-q) + p * q * pgeom(x-1, prob=lambda_up)
+    }
+    
+    return(pch_cdf)
+}
+```
+
+```{r}
+decomp_params <- list(beta_0 = beta_0, beta_1 = beta_1,
+                      gamma_0 = gamma_0, gamma_1 = gamma_1,
+                      theta_u0 = theta_u0, theta_u1 = theta_u1,
+                      theta_d0 = theta_d0, theta_d1 = theta_d1)
+
+decomp_cross_prob <- pch_decomposition_cdf(-1, aim1=1, dim1=-1, sim1=2, decomp_params)
+decomp_cross_prob
+```
+
+
+
+
+

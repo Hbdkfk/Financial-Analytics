@@ -1,0 +1,151 @@
+---
+title: "Homework7"
+author: "Chen Liu"
+date: "2/29/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Using the options data from file OptionsPrices.csv used in the workshop calculate the P&L breakdown into delta, gamma and vega components of 1425 December 2007 put for each day between 2/27/2007 and 3/5/2007.
+Compare actual P&L for 1425 December 2007 put with the estimated daily P&L for each day between 2/27/2007 and 3/5/2007.
+Put the results in table with columns: actual P&L, estimated P&L, delta P&L, gamma P&L, vega P&L.
+
+```{r,include=FALSE}
+library(tidyverse)
+library(RQuantLib)
+```
+
+```{r}
+datapath<-"/Users/me/Desktop/MSCA/FinancialAnalytics/week7"
+optionsData <- read.csv(paste(datapath,'OptionsPrices.csv',sep='/'),header=TRUE,row.names=1,sep=",")
+```
+
+### 1. calculate the P&L breakdown into delta, gamma and vega components of 1425 December 2007 put for each day between 2/27/2007 and 3/5/2007.
+
+#### Create function implying volatility structure from put prices of one row of optionsData.
+
+```{r}
+# Calculate implied volatility for puts
+impVolPuts<-apply(as.matrix(optionsData),1,
+                      function(z) EuropeanOptionImpliedVolatility("put", 
+                                                                  value=z[26],
+                                                                  underlying = z[3],
+                                                                  strike=1425,
+                                                                  dividendYield = z[2],
+                                                                  riskFreeRate = z[2],
+                                                                  maturity = z[1]/365,
+                                                                  volatility=0.3))
+
+head(impVolPuts)
+
+```
+
+```{r}
+n <-nrow(optionsData)
+#Calculate option value,delta,gamma,vega
+value<-rep(NA,n) 
+delta<-rep(NA,n) 
+gamma<-rep(NA,n) 
+vega<-rep(NA,n) 
+
+for (i in 1:n){
+  value[i] <- unlist(EuropeanOption(type="put", 
+                                  underlying=optionsData[i,3], 
+                                  strike=1425,
+                                  dividendYield=optionsData[i,2],
+                                  riskFreeRate=optionsData[i,2],
+                                  maturity=optionsData[i,1]/365, 
+                                  volatility=impVolPuts[i]))[1] 
+  delta[i] <- unlist(EuropeanOption(type="put", 
+                                  underlying=optionsData[i,3], 
+                                  strike=1425,
+                                  dividendYield=optionsData[i,2],
+                                  riskFreeRate=optionsData[i,2],
+                                  maturity=optionsData[i,1]/365, 
+                                  volatility=impVolPuts[i]))[2] 
+  gamma[i] <- unlist(unlist(EuropeanOption(type="put", 
+                                  underlying=optionsData[i,3], 
+                                  strike=1425,
+                                  dividendYield=optionsData[i,2],
+                                  riskFreeRate=optionsData[i,2],
+                                  maturity=optionsData[i,1]/365, 
+                                  volatility=impVolPuts[i]))[3]) 
+  vega[i] <- unlist(unlist(EuropeanOption(type="put", 
+                                  underlying=optionsData[i,3], 
+                                  strike=1425,
+                                  dividendYield=optionsData[i,2],
+                                  riskFreeRate=optionsData[i,2],
+                                  maturity=optionsData[i,1]/365, 
+                                  volatility=impVolPuts[i]))[4]) 
+}
+summary2<-data.frame('Value'=value,'Delta'= delta,'Gamma'=gamma,'Vega'=vega) 
+rownames(summary2) <- rownames(optionsData)
+head(summary2)
+```
+
+```{r}
+
+PutPNL.Delta<-rep(NA,209) 
+PutPNL.Gamma<-rep(NA,209) 
+PutPNL.Vega<-rep(NA,209)
+for (i in 2:n) {
+  PutPNL.Delta[i]<-delta[i-1]*(optionsData[i,3]-optionsData[i-1,3])
+  PutPNL.Gamma[i]<-.5*gamma[i-1]*(optionsData[i,3]-optionsData[i-1,3])^2
+  PutPNL.Vega[i]<-vega[i-1]*
+                      (impVolPuts[i]-impVolPuts[i-1])
+}
+putPNL.estimated<-data.frame(delta=PutPNL.Delta,gamma=PutPNL.Gamma,vega=PutPNL.Vega)
+rownames(putPNL.estimated)<-rownames(optionsData)
+head(putPNL.estimated)
+```
+
+```{r}
+putPNL.estimatedTotal<-apply(putPNL.estimated,1,sum)
+putPNL.actual<-c(NA,diff(optionsData$P1425))
+```
+
+## Create table
+```{r}
+PNL<-data.frame(actual=putPNL.actual,estimated=putPNL.estimatedTotal,
+                delta=PutPNL.Delta,gamma=PutPNL.Gamma,vega=PutPNL.Vega)
+rownames(PNL)<-rownames(optionsData)
+head(PNL)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
